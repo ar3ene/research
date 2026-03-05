@@ -226,6 +226,7 @@ class ContinuousRBM:
             h_k: 最后一步的隐藏层状态
         """
         v = v_init
+        h = self.sample_h_given_v(v)
         for _ in range(k):
             v, h = self.gibbs_step(v)
         return v, h
@@ -367,7 +368,7 @@ class CDTrainer:
         v_recon, _ = m.gibbs_chain(v_data, k=1)
         recon_error = np.mean((v_data - v_recon) ** 2)
 
-        return recon_error
+        return float(recon_error)
 
 
 # ==============================================================================
@@ -467,7 +468,7 @@ def kl_divergence_estimate(p_samples: np.ndarray, model: ContinuousRBM) -> float
         自由能的均值（与KL散度单调相关的代理量）
     """
     F = model.free_energy(p_samples)
-    return np.mean(F) / model.kT
+    return float(np.mean(F) / model.kT)
 
 
 def variational_free_energy(data: np.ndarray, model: ContinuousRBM) -> float:
@@ -481,7 +482,7 @@ def variational_free_energy(data: np.ndarray, model: ContinuousRBM) -> float:
         data:  训练数据 (n_samples, n_dim)
         model: ContinuousRBM 模型
     """
-    return np.mean(model.free_energy(data))
+    return float(np.mean(model.free_energy(data)))
 
 
 # ==============================================================================
@@ -778,7 +779,7 @@ def demo_gaussian_mixture():
 # ==============================================================================
 
 
-def verify_universal_approximation(n_hidden_list: List[int] = None):
+def verify_universal_approximation(n_hidden_list: Optional[List[int]] = None):
     """
     验证通用近似定理：随着隐藏变量数增加，模型逼近能力增强。
 
@@ -823,7 +824,7 @@ def verify_universal_approximation(n_hidden_list: List[int] = None):
 
 if __name__ == "__main__":
     print("╔══════════════════════════════════════════════════════════╗")
-    print("║     Generative Thermodynamic Computing — 代码演示       ║")
+    print("║     Generative Thermodynamic Computing — 代码演示         ║")
     print("╠══════════════════════════════════════════════════════════╣")
     print("║  论文复现：用热力学系统的玻尔兹曼分布进行生成建模         ║")
     print("╚══════════════════════════════════════════════════════════╝")
