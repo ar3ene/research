@@ -1,194 +1,156 @@
-# 生成式热力学计算（Generative Thermodynamic Computing）
-
-## 一、论文核心思想
-
-本文提出了一种**用物理热力学系统进行概率生成建模**的框架。核心思路是：
-
-> 与其用数字计算机模拟概率分布（如扩散模型、玻尔兹曼机等），不如直接让一个真实的物理系统自然地**弛豫（relax）**到其热平衡态，利用物理系统的热涨落进行采样。
-
-关键创新：论文给出了一套**严格的数学方法**，能够设计物理系统的能量函数（哈密顿量），使其平衡分布**精确等于**我们希望生成的目标概率分布。
-
----
-
-## 二、数学框架
-
-### 2.1 基本设定
-
-考虑一个经典热力学系统，状态由连续变量 $\mathbf{x} = (x_1, x_2, \dots, x_n)$ 描述。在温度 $T$ 下，系统的平衡分布是**玻尔兹曼分布**：
-
-$$p_{\text{eq}}(\mathbf{x}) = \frac{1}{Z} e^{-H(\mathbf{x}) / k_B T}$$
-
-其中 $H(\mathbf{x})$ 是哈密顿量（能量函数），$Z = \int e^{-H(\mathbf{x})/k_BT} d\mathbf{x}$ 是配分函数。
-
-**核心问题**：给定目标分布 $p_{\text{target}}(\mathbf{x})$，如何选择 $H(\mathbf{x})$ 使得 $p_{\text{eq}} = p_{\text{target}}$？
-
-**理论答案**：
-
-$$H(\mathbf{x}) = -k_B T \ln p_{\text{target}}(\mathbf{x})$$
-
-但实际物理硬件能实现的能量函数形式有限制。
-
-### 2.2 硬件约束与可实现的哈密顿量
-
-实际物理系统（如耦合RLC电路）能实现的哈密顿量通常是**受限形式**：
-
-$$H(\mathbf{x}) = \sum_i V_i(x_i) + \sum_{i<j} K_{ij}(x_i, x_j)$$
-
-即单体势能 $V_i$ 加两体耦合 $K_{ij}$。
-
-最简单（"vanilla"）情况：
-
-$$H(\mathbf{x}) = \sum_i \left(\frac{a_i}{2} x_i^2 + \frac{b_i}{4} x_i^4\right) + \sum_{i<j} \frac{J_{ij}}{2}(x_i - x_j)^2$$
-
-可调参数为 $\{a_i, b_i, J_{ij}\}$。
-
-### 2.3 核心数学方法：KL散度最小化
-
-最小化**KL散度**：
-
-$$D_{\text{KL}}(p_{\text{target}} \| p_H) = \int p_{\text{target}}(\mathbf{x}) \ln \frac{p_{\text{target}}(\mathbf{x})}{p_H(\mathbf{x})} \, d\mathbf{x}$$
-
-展开后：
-
-$$D_{\text{KL}} = \underbrace{-\int p_{\text{target}} \ln p_{\text{target}} \, d\mathbf{x}}_{-S_{\text{target}}} + \frac{1}{k_BT}\underbrace{\int p_{\text{target}} H(\mathbf{x}) \, d\mathbf{x}}_{\langle H \rangle_{\text{target}}} + \ln Z$$
-
-最小化KL散度等价于最小化**变分自由能**：
-
-$$\mathcal{L}(\boldsymbol{\theta}) = \langle H_{\boldsymbol{\theta}}(\mathbf{x}) \rangle_{p_{\text{target}}} + k_B T \ln Z(\boldsymbol{\theta})$$
-
-### 2.4 梯度计算
-
-对参数 $\theta_k$ 求梯度：
-
-$$\frac{\partial \mathcal{L}}{\partial \theta_k} = \left\langle \frac{\partial H}{\partial \theta_k} \right\rangle_{p_{\text{target}}} - \left\langle \frac{\partial H}{\partial \theta_k} \right\rangle_{p_H}$$
-
-梯度等于某量在**目标分布**下的期望值减去它在**当前模型分布**下的期望值。
-
-- 第一项 $\langle \cdot \rangle_{p_{\text{target}}}$：从训练数据统计平均
-- 第二项 $\langle \cdot \rangle_{p_H}$：让物理系统弛豫到平衡后采样计算
-
-若哈密顿量中参数线性出现（$H = \sum_k \theta_k \phi_k(\mathbf{x})$），则：
-
-$$\frac{\partial \mathcal{L}}{\partial \theta_k} = \langle \phi_k \rangle_{\text{data}} - \langle \phi_k \rangle_{\text{model}}$$
-
-### 2.5 充分统计量与精确表示条件
-
-**定理**：当且仅当哈密顿量中的特征函数 $\{\phi_k(\mathbf{x})\}$ 构成目标分布的**充分统计量**时，玻尔兹曼分布可以精确表示目标分布。
-
-若目标分布是指数族：
-
-$$p_{\text{target}}(\mathbf{x}) = h(\mathbf{x}) \exp\left(\sum_k \eta_k \phi_k(\mathbf{x}) - A(\boldsymbol{\eta})\right)$$
-
-令 $H(\mathbf{x}) = -k_BT \sum_k \theta_k \phi_k(\mathbf{x})$，取 $\theta_k = \eta_k$ 即可精确匹配。
+**先给出名词定义（按后文使用顺序）**
+1. 状态变量 $\mathbf{x}$：系统在某一时刻的全部连续自由度，例如电压、位置等。
+2. 哈密顿量 $H(\mathbf{x})$：把每个状态映射到一个能量标量的函数。能量越低，状态越“容易出现”。
+3. 热平衡分布（玻尔兹曼分布）：
+$$
+p_{\text{eq}}(\mathbf{x}) = \frac{1}{Z} e^{-H(\mathbf{x})/(k_B T)}, \quad
+Z = \int e^{-H(\mathbf{x})/(k_B T)} \, d\mathbf{x}
+$$
+其中 $Z$ 是配分函数（归一化常数），$k_B T$ 是热噪声尺度。
+4. 目标分布 $p_{\text{target}}$：你想让模型生成的数据分布。
+5. KL 散度：
+$$
+D_{\mathrm{KL}}(p\|q) = \int p(\mathbf{x}) \ln \frac{p(\mathbf{x})}{q(\mathbf{x})} \, d\mathbf{x}
+$$
+衡量“用 $q$ 近似 $p$”的信息损失，且 $D_{\mathrm{KL}}\ge0$，等号当且仅当两分布几乎处处相等。
+6. 变分自由能目标（这里是训练目标的等价写法）：
+$$
+\mathcal{L}(\theta) = \langle H_{\theta}(\mathbf{x}) \rangle_{p_{\text{target}}} + k_B T \ln Z(\theta)
+$$
+7. 潜变量 $\mathbf{z}$：不直接观测的中间变量，用来提升表达能力。
+8. 有效自由能 $F_{\text{eff}}(\mathbf{v})$：把潜变量积分掉后，仅对可见变量 $\mathbf{v}$ 的等效能量。
+9. Langevin 动力学：连续状态的“梯度下降 + 热噪声”随机动力学。
+10. Gibbs 采样：在各条件分布之间交替采样，构造马尔可夫链逼近平衡分布。
+11. CD（Contrastive Divergence）：用有限步 Gibbs 链近似难算的模型期望项。
 
 ---
 
-## 三、潜变量与生成模型
+**主逻辑链（严格三段论）**
 
-### 3.1 潜变量架构
+**三段论 1：为什么“物理系统”可以做生成模型**
+1. 大前提：任意热平衡系统的状态分布都满足玻尔兹曼形式 $p_{\text{eq}} \propto e^{-H/(k_B T)}$。
+2. 小前提：若选择
+$$
+H^*(\mathbf{x}) = -k_B T \ln p_{\text{target}}(\mathbf{x}),
+$$
+则代回可得 $p_{\text{eq}}(\mathbf{x}) = p_{\text{target}}(\mathbf{x})$。
+3. 结论：只要能实现合适的 $H$，让物理系统自然弛豫到平衡，就等价于“从目标分布采样”。
 
-引入**潜变量** $\mathbf{z}$，将物理变量分为：
-
-- **可见变量** $\mathbf{v}$：对应数据维度
-- **潜变量** $\mathbf{z}$：辅助隐藏维度
-
-联合分布：
-
-$$p(\mathbf{v}, \mathbf{z}) = \frac{1}{Z} e^{-H(\mathbf{v}, \mathbf{z})/k_BT}$$
-
-边缘分布：
-
-$$p(\mathbf{v}) = \int p(\mathbf{v}, \mathbf{z}) \, d\mathbf{z} = \frac{1}{Z} e^{-F_{\text{eff}}(\mathbf{v})/k_BT}$$
-
-**有效自由能**：
-
-$$F_{\text{eff}}(\mathbf{v}) = -k_BT \ln \int e^{-H(\mathbf{v}, \mathbf{z})/k_BT} d\mathbf{z}$$
-
-即使每个物理变量只有简单势能和耦合，边缘化潜变量后的有效自由能可以是**任意复杂的非线性函数**。
-
-### 3.2 与受限玻尔兹曼机（RBM）的类比
-
-双线性耦合哈密顿量：
-
-$$H(\mathbf{v}, \mathbf{z}) = \sum_i V_i(v_i) + \sum_j V_j(z_j) + \sum_{i,j} J_{ij} v_i z_j$$
-
-等价于连续变量版本的**受限玻尔兹曼机**（RBM）。二部图结构使条件分布的采样可解析。
+对应文档位置： [doc/GenerativeThermodynamicComputing.md](doc/GenerativeThermodynamicComputing.md#L19), [doc/GenerativeThermodynamicComputing.md](doc/GenerativeThermodynamicComputing.md#L27)
 
 ---
 
-## 四、训练方法
+**三段论 2：为什么训练目标是 KL 最小化**
+1. 大前提：$D_{\mathrm{KL}}(p_{\text{target}}\|p_{\theta}) \ge 0$，最小值 0 在 $p_{\theta} = p_{\text{target}}$ 时达到。
+2. 小前提：把
+$$
+p_{\theta}(\mathbf{x}) = \frac{1}{Z(\theta)} e^{-H_{\theta}(\mathbf{x})/(k_B T)}
+$$
+代入 KL，展开得
+$$
+D_{\mathrm{KL}}
+= -S_{\text{target}} + \frac{1}{k_B T}\langle H_{\theta} \rangle_{p_{\text{target}}} + \ln Z(\theta).
+$$
+其中 $-S_{\text{target}}$ 与参数 $\theta$ 无关。
+3. 结论：最小化 KL 等价于最小化
+$$
+\mathcal{L}(\theta) = \langle H_{\theta} \rangle_{p_{\text{target}}} + k_B T \ln Z(\theta).
+$$
 
-### 4.1 对比散度（Contrastive Divergence, CD）
-
-1. 从训练样本 $\mathbf{v}^{(0)}$ 出发
-2. 执行 $k$ 步Gibbs采样（物理上对应部分弛豫）
-3. 用 $k$ 步后的样本近似 $\langle \cdot \rangle_{p_H}$
-
-### 4.2 物理Gibbs采样
-
-对于连续变量RBM结构，条件分布是高斯的：
-
-$$p(z_j | \mathbf{v}) \propto \exp\left(-\frac{(z_j - \mu_j(\mathbf{v}))^2}{2\sigma_j^2}\right)$$
-
-其中均值 $\mu_j(\mathbf{v}) = -\frac{\sum_i J_{ij} v_i}{a_j^{(z)}}$，方差 $\sigma_j^2 = \frac{k_BT}{a_j^{(z)}}$。
-
----
-
-## 五、物理实现
-
-### 5.1 耦合非线性振荡器
-
-物理实现为**耦合RLC电路**：
-
-- 每个节点：**非线性LC振荡器**（含线性电感和非线性电容），浸泡在热噪声中
-- 节点间：**线性耦合器**（电阻网络或互感器）
-- 电容器两端电压 $V_i$ 对应变量 $x_i$
-
-能量函数：
-
-$$H = \sum_i \left(\frac{1}{2}C_i^{(1)} V_i^2 + \frac{1}{4}C_i^{(2)} V_i^4\right) + \frac{1}{2}\sum_{i \neq j} C_{ij}^{\text{coup}} (V_i - V_j)^2$$
-
-### 5.2 时间尺度
-
-弛豫时间在GHz电路中可达**纳秒量级**，远快于数字计算。
+对应文档位置： GenerativeThermodynamicComputing.md, GenerativeThermodynamicComputing.md
 
 ---
 
-## 六、通用近似定理
+**三段论 3：为什么梯度是“数据期望 - 模型期望”**
+大前提：对数配分函数导数恒等式
+$$
+\frac{\partial \ln Z}{\partial \theta_k}
+= -\frac{1}{k_B T}\langle \frac{\partial H}{\partial \theta_k} \rangle_{p_{\theta}}.
+$$
 
-**定理**：给定任意目标分布 $p_{\text{target}}(\mathbf{v})$（满足正则性条件），对于任意 $\varepsilon > 0$，存在潜变量数目 $m$ 和哈密顿量参数，使得：
+小前提：对 $\mathcal{L}$ 求导：
+$$\frac{\partial \mathcal{L}}{\partial \theta_k} = \langle \frac{\partial H}{\partial \theta_k} \rangle_{p_{\text{target}}} + k_B T \frac{\partial \ln Z}{\partial \theta_k}.$$
 
-$$D_{\text{KL}}(p_{\text{target}} \| p) < \varepsilon$$
+把大前提代入即得
+$$\frac{\partial \mathcal{L}}{\partial \theta_k} = \langle \frac{\partial H}{\partial \theta_k} \rangle_{\text{data}} - \langle \frac{\partial H}{\partial \theta_k} \rangle_{\text{model}}.$$
 
-**证明要点**：
+结论：训练本质是“把模型统计量拉向数据统计量匹配”。
 
-1. $-\ln p_{\text{target}}(\mathbf{v})$ 可用基函数展开
-2. 每个特征函数通过边缘化潜变量实现
-3. 高斯积分边缘化：$\int e^{-\frac{a}{2}z^2 - Jvz} dz \propto e^{\frac{J^2 v^2}{2a}}$
-4. 非线性势能（$x^4$项）和多层潜变量组合可构建更高阶项
-
----
-
-## 七、实验验证
-
-| 数据集 | 可见变量数 | FID |
-|--------|-----------|-----|
-| Swiss Roll（2D） | 2 | 0.11 |
-| MNIST | 780 | 21.0 |
-| CIFAR-10 | 3072 | 75.4 |
+对应文档与实现： GenerativeThermodynamicComputing.md, training.py, training.py
 
 ---
 
-## 八、核心贡献总结
+**三段论 4：为什么潜变量能显著增强表达力**
+1. 大前提：边缘化潜变量会产生新的有效能量曲面：
+$$
+p(\mathbf{v}) = \int p(\mathbf{v}, \mathbf{z}) \, d\mathbf{z}
+= \frac{1}{Z} e^{-F_{\text{eff}}(\mathbf{v})/(k_B T)},
+$$
+$$
+F_{\text{eff}}(\mathbf{v})
+= -k_B T \ln \int e^{-H(\mathbf{v}, \mathbf{z})/(k_B T)} \, d\mathbf{z}.
+$$
+2. 小前提：即便 $H(\mathbf v,\mathbf z)$ 在 $(\mathbf v,\mathbf z)$ 上形式简单，积分操作本身是非线性的，会在 $\mathbf v$ 空间产生复杂势面；例如高斯积分会带来新的二次项结构。
+3. 结论：通过增加潜变量维度，可以用相对简单的物理单元逼近复杂数据分布（通用近似思想）。
 
-| 贡献 | 内容 |
-|------|------|
-| **理论框架** | 将生成建模映射为设计哈密顿量，使玻尔兹曼分布匹配目标分布 |
-| **优化方法** | KL散度最小化 → 变分自由能最小化 → 梯度 = $\langle\cdot\rangle_{\text{data}} - \langle\cdot\rangle_{\text{model}}$ |
-| **表示能力** | 通过潜变量边缘化，简单物理系统可表示任意复杂分布（通用近似定理） |
-| **物理实现** | 耦合非线性LC电路，热噪声提供随机性 |
-| **速度优势** | 物理弛豫纳秒量级完成，比数字MCMC或反向扩散快数量级 |
+对应文档位置： GenerativeThermodynamicComputing.md, GenerativeThermodynamicComputing.md, GenerativeThermodynamicComputing.md
 
-## 九、一句话总结
+---
 
-> 一个由简单非线性振荡器组成的热力学系统，通过适当选择其物理参数（由训练优化），可以在自然弛豫到热平衡的过程中精确地从任意目标概率分布中采样——这是将物理学本身作为计算引擎的范式。
+**三段论 5：为什么 Langevin 更新公式是这样**
+1. 大前提：过阻尼 Langevin 方程
+$$
+d\mathbf{x}_t = -\frac{1}{\gamma}\nabla H(\mathbf{x}_t)\,dt + \sqrt{\frac{2k_B T}{\gamma}}\,d\mathbf{W}_t
+$$
+的平稳分布是玻尔兹曼分布。
+2. 小前提：Euler 离散化得到
+$$\mathbf{x}_{t+\Delta t} = \mathbf{x}_t - \frac{\Delta t}{\gamma}\nabla H(\mathbf{x}_t) + \sqrt{\frac{2k_B T\Delta t}{\gamma}}\,\xi_t,\quad \xi_t \sim \mathcal{N}(0, I).$$
+3. 结论：只要 $\Delta t$ 足够小、burn-in 足够长，离散链样本就逼近目标热平衡分布。
+
+对应实现： sampling.py, sampling.py
+
+---
+
+**重点公式逐条精讲（尽量“高中生可懂”但不牺牲严谨性）**
+
+1. 玻尔兹曼分布中的指数项 $e^{-H/(k_BT)}$  
+解释：同温度下，能量每升高 $\Delta H$，相对概率按因子 $e^{-\Delta H/(k_BT)}$ 衰减。  
+严谨点：这是“相对概率”规律，绝对概率还需由 $Z$ 归一化。
+
+2. 配分函数 $Z$ 的作用  
+解释：把“未归一化权重”变成合法概率。  
+严谨点：$Z$ 同时决定热力学量（自由能等），训练难点也主要来自 $\ln Z$ 的梯度估计。
+
+3. KL 展开到自由能目标  
+解释：KL 的第一项只由真实数据分布决定，不受模型参数影响；真正可优化的是 $\langle H \rangle + k_B T\ln Z$。
+严谨点：这是“同一最优解的等价目标”，不是近似替换。
+
+4. 梯度差分形式  
+解释：模型对某统计量“估高了”，就往下调；“估低了”，就往上调。  
+严谨点：这是指数族/能量模型训练的核心恒等式，不依赖具体网络结构。
+
+5. 连续 RBM 的条件高斯  
+在二部图结构下，给定一侧后另一侧条件分布可简化为高斯（或近高斯），使 Gibbs 采样可执行。  
+对应实现入口： rbm.py, rbm.py
+
+6. 有效自由能代理  
+代码里
+$$
+F_{\text{proxy}}(\mathbf{v}) = E_v(\mathbf{v}) - \sum_j \frac{field_j(\mathbf{v})^2}{2a_{h,j}}
+$$
+对应把隐藏变量近似高斯积分掉后的解析项。  
+对应实现： rbm.py
+
+---
+
+**你这个项目实现中的“精确性边界”（很关键）**
+1. 代码在 $p(h\mid v)$ 里注明“忽略 $h^4$ 项”做高斯近似，所以它是可计算近似，不是严格精确后验。见 rbm.py。
+2. 因为有此近似，free energy 与 KL 指标在实现里是“代理量/单调 proxy”，不是严格真值。见 metrics.py, metrics.py。
+3. 这不违背理论框架，但你应把“理论等价”与“数值近似训练”分开理解。
+
+---
+
+**一句话把整套方法扣紧**
+Generative Thermodynamic Computing 的严格核心是：先用能量模型把“生成”转写成“平衡分布匹配”，再用 KL/自由能梯度把参数学习成“数据统计 = 模型统计”，最后利用真实或模拟热动力学的自然随机性来直接采样。理论上闭环，工程上通过 CD 和条件近似实现可训练性。  
+
+如果你愿意，我下一步可以按你 notebook 的四个实验（Langevin、Swiss Roll、高斯混合、通用近似验证）逐个做“公式-代码-结果解读”对照版。
