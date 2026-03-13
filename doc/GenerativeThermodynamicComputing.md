@@ -1,9 +1,4 @@
-下面的拆解基于论文 *Generative Thermodynamic Computing*（*Physical Review Letters* 136, 037101, published on January 20, 2026）原文。目标有两个：
-
-1. 先把所有复杂名词定义清楚。
-2. 再按“三段论 + 逐式推导”的方式，把论文从公式 (1) 到公式 (14) 串成一条严密逻辑链。
-
-全文默认读者是理科高中生：解释尽量直白，但不牺牲数学精确性。
+下面的拆解基于论文 *Generative Thermodynamic Computing*（*Physical Review Letters* 136, 037101, published on January 20, 2026）原文。
 
 **一、先定义名词**
 
@@ -58,8 +53,6 @@
 结论：若能落地为模拟硬件，能耗可能远低于数字去噪网络。
 
 **四、核心公式与逐式推导**
-
-这一节是全文重点。所有块级公式统一用 `$$ ... $$`。
 
 **4.1 公式 (1)：连续时间的 Langevin 方程**
 
